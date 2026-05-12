@@ -5,9 +5,12 @@ Run from project root: python _test_api.py
 import time
 import urllib.request
 import urllib.error
+import os
 import json
 
-BASE = "http://127.0.0.1:8001/api/v1"
+# Override with TEST_API_URL env var to test production:
+#   TEST_API_URL=https://quantpilot-po4m.onrender.com python _test_api.py
+BASE = os.getenv("TEST_API_URL", "http://127.0.0.1:8000").rstrip("/") + "/api/v1"
 
 def post(path, body, token=None):
     data = json.dumps(body).encode()

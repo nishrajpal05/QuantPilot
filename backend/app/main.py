@@ -11,12 +11,15 @@ app = FastAPI(
     docs_url="/docs" if settings.environment == "development" else None,
     redoc_url=None,
 )
+
+_origins = settings.origins_list if settings.environment == "production" else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+    expose_headers=["Content-Length"],
 )
 # ── Routers ────────────────────────────────────────────────────────────────────
 PREFIX = "/api/v1"

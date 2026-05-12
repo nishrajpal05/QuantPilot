@@ -14,10 +14,18 @@ services:
         sync: false
       - key: GROQ_API_KEY_FALLBACK
         sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
       - key: REDIS_URL
         sync: false
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: https://quant-pilot-one.vercel.app
       - key: ENVIRONMENT
         value: production
+      - key: QP_USE_LIVE_DATA
+        value: "1"
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
     healthCheckPath: /health
