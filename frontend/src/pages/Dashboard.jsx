@@ -93,7 +93,7 @@ export default function Dashboard() {
               </div>
 
               {history.map((item) => {
-                const ret = item.results?.total_return_pct;
+                const ret = item.total_return_pct;
                 const retNum = parseFloat(ret);
                 return (
                   <Link

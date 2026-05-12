@@ -18,9 +18,8 @@ export default function Login() {
       const res = await authAPI.login({ email: form.email, password: form.password });
       const { access_token } = res.data;
       // Fetch user profile
-      const meRes = await import('../api/client').then(m =>
-        m.default.get('/api/v1/auth/me', { headers: { Authorization: `Bearer ${access_token}` } })
-      );
+      localStorage.setItem('qp_token', access_token);
+      const meRes = await authAPI.me();
       login(access_token, meRes.data);
       navigate('/', { replace: true });
     } catch (err) {

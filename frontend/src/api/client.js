@@ -1,9 +1,13 @@
 import axios from 'axios';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_ORIGIN = import.meta.env.VITE_API_URL;
+
+if (!API_ORIGIN) {
+  throw new Error('VITE_API_URL is required. Example: http://localhost:8000');
+}
 
 const client = axios.create({
-  baseURL: BASE_URL,
+  baseURL: `${API_ORIGIN.replace(/\/$/, '')}/api/v1`,
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -35,21 +39,21 @@ client.interceptors.response.use(
 
 // ── Auth ─────────────────────────────────────────────────────
 export const authAPI = {
-  register: (data) => client.post('/api/v1/auth/register', data),
-  login: (data) => client.post('/api/v1/auth/login', data),
-  me: () => client.get('/api/v1/auth/me'),
+  register: (data) => client.post('/auth/register', data),
+  login: (data) => client.post('/auth/login', data),
+  me: () => client.get('/auth/me'),
 };
 
 // ── Backtest ──────────────────────────────────────────────────
 export const backtestAPI = {
-  create: (data) => client.post('/api/v1/backtest', data),
-  getById: (id) => client.get(`/api/v1/backtest/${id}`),
-  list: () => client.get('/api/v1/backtest/list'),
+  create: (data) => client.post('/backtest', data),
+  getById: (id) => client.get(`/backtest/${id}`),
+  list: () => client.get('/backtest/list'),
 };
 
 // ── Data ──────────────────────────────────────────────────────
 export const dataAPI = {
-  symbols: () => client.get('/api/v1/data/symbols'),
+  symbols: () => client.get('/data/symbols'),
 };
 
 export default client;

@@ -15,14 +15,23 @@ export default function ChatInput({ onSubmit, loading }) {
   const [endDate, setEndDate] = useState('2024-12-31');
   const [capital, setCapital] = useState('100000');
   const [symbols, setSymbols] = useState([]);
-  const [symLoading, setSymLoading] = useState(false);
+  const [symLoading, setSymLoading] = useState(true);
 
   useEffect(() => {
-    setSymLoading(true);
+    let active = true;
     dataAPI.symbols()
-      .then((r) => setSymbols(r.data || []))
-      .catch(() => setSymbols(['RELIANCE', 'INFY', 'TCS', 'HDFCBANK', 'ICICIBANK', 'NIFTY 50']))
-      .finally(() => setSymLoading(false));
+      .then((r) => {
+        if (active) setSymbols(Array.isArray(r.data) ? r.data : r.data?.symbols || []);
+      })
+      .catch(() => {
+        if (active) setSymbols(['RELIANCE', 'INFY', 'TCS', 'HDFCBANK', 'ICICIBANK', 'NIFTY 50']);
+      })
+      .finally(() => {
+        if (active) setSymLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const handleSubmit = (e) => {

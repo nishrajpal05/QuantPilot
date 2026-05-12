@@ -52,10 +52,26 @@ export default function BacktestResult() {
               {data?.symbol || '—'} Backtest
             </h1>
             {data && (
-              <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-                {fmtDate(data.start_date)} → {fmtDate(data.end_date)}
-                {data.initial_capital && ` · ₹${Number(data.initial_capital).toLocaleString('en-IN')} capital`}
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
+                <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: 0, fontFamily: 'var(--font-mono)' }}>
+                  {fmtDate(data.start_date)} → {fmtDate(data.end_date)}
+                  {data.initial_capital && ` · ₹${Number(data.initial_capital).toLocaleString('en-IN')} capital`}
+                </p>
+                {data.data_source && (
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600,
+                    padding: '2px 8px', borderRadius: 4,
+                    background: data.data_source === 'sample'
+                      ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.12)',
+                    color: data.data_source === 'sample' ? '#ef4444' : '#10b981',
+                    border: `1px solid ${data.data_source === 'sample' ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.25)'}`,
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', display: 'inline-block' }} />
+                    Data: {data.data_source}{data.rows_used ? ` · ${data.rows_used} rows` : ''}
+                  </span>
+                )}
+              </div>
             )}
           </div>
 

@@ -7,6 +7,13 @@ const TERMINAL_STATUSES = ['completed', 'failed'];
 export default function StatusPoller({ backtestId, onUpdate, onComplete }) {
   const timerRef = useRef(null);
   const activeRef = useRef(true);
+  const onUpdateRef = useRef(onUpdate);
+  const onCompleteRef = useRef(onComplete);
+
+  useEffect(() => {
+    onUpdateRef.current = onUpdate;
+    onCompleteRef.current = onComplete;
+  }, [onUpdate, onComplete]);
 
   useEffect(() => {
     if (!backtestId) return;
@@ -17,10 +24,10 @@ export default function StatusPoller({ backtestId, onUpdate, onComplete }) {
       try {
         const res = await backtestAPI.getById(backtestId);
         const data = res.data;
-        onUpdate?.(data);
+        onUpdateRef.current?.(data);
         if (TERMINAL_STATUSES.includes(data.status)) {
           activeRef.current = false;
-          onComplete?.(data);
+          onCompleteRef.current?.(data);
           return;
         }
       } catch (err) {

@@ -37,8 +37,8 @@ const METRICS = [
   {
     key: 'win_rate',
     label: 'Win Rate',
-    format: fmt.pct,
-    accent: (v) => +v >= 50 ? 'var(--green)' : 'var(--amber)',
+    format: (v) => v != null ? `${(+v * 100).toFixed(2)}%` : 'â€”',
+    accent: (v) => +v >= 0.5 ? 'var(--green)' : 'var(--amber)',
     colorValue: true,
   },
   {

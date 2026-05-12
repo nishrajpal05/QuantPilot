@@ -29,9 +29,8 @@ export default function Register() {
         password: form.password,
       });
       const { access_token } = res.data;
-      const meRes = await import('../api/client').then(m =>
-        m.default.get('/api/v1/auth/me', { headers: { Authorization: `Bearer ${access_token}` } })
-      );
+      localStorage.setItem('qp_token', access_token);
+      const meRes = await authAPI.me();
       login(access_token, meRes.data);
       navigate('/', { replace: true });
     } catch (err) {
