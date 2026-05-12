@@ -9,6 +9,7 @@ To install: pip install vectorbt==0.26.2
 import logging
 import os
 import signal
+import threading
 from contextlib import contextmanager
 
 import pandas as pd
@@ -18,13 +19,26 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def timeout(seconds: int):
-    """SIGALRM-based timeout (Unix only). On Windows this is a no-op — rely on the 30s limit instead."""
+    """
+    SIGALRM-based 30-second timeout.
+
+    Two conditions must BOTH be true to use SIGALRM:
+      1. signal.SIGALRM exists  (Linux/macOS — not Windows)
+      2. We are in the main thread  (signal.signal() raises ValueError in any
+         other thread, e.g. FastAPI BackgroundTasks worker threads on Render)
+
+    When either condition fails we yield without a hard timeout — vectorbt will
+    still complete or raise naturally (typical run < 5 s for daily data).
+    """
     def handler(signum, frame):
         raise TimeoutError(f"Backtest exceeded {seconds}s timeout")
 
-    if not hasattr(signal, "SIGALRM"):
-        # Windows: no SIGALRM support — just yield without enforcing a hard timeout.
-        # vectorbt itself will complete or raise naturally.
+    in_main_thread = threading.current_thread() is threading.main_thread()
+    has_sigalrm = hasattr(signal, "SIGALRM")
+
+    if not has_sigalrm or not in_main_thread:
+        # Windows, or Linux background thread (FastAPI BackgroundTasks on Render)
+        # — skip SIGALRM, no hard timeout enforced.
         yield
         return
 
