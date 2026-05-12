@@ -1,0 +1,14 @@
+backend/.env
+backend/.yfinance-cache/cookies.db
+backend/app/__pycache__/__init__.cpython-312.pyc
+backend/app/agents/__pycache__/__init__.cpython-312.pyc
+backend/app/agents/__pycache__/models.cpython-312.pyc
+backend/app/agents/__pycache__/audit_agent.cpython-312.pyc
+/backend/app/agents/__pycache__
+/backend/app/api/__pycache__
+*.pyc
+backend/app/sandbox/__init__.py
+backend/app/core/__init__.py
+backend/app/api/__init__.py
+backend/app/__init__.py
+backend/.yfinance-cache/tkr-tz.db
