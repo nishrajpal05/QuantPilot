@@ -1,5 +1,5 @@
-import json
 import uuid
+import json
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -14,130 +14,117 @@ from app.core.config import get_settings
 settings = get_settings()
 router = APIRouter(prefix="/backtest", tags=["backtest"])
 
+VALID_RESOLUTIONS = {"D", "1min", "2min", "3min", "5min", "10min", "15min", "30min", "60min"}
 
-# ── Request / Response models 
 
 class BacktestRequest(BaseModel):
-    symbol: str
-    exchange: str = "NSE"
-    start_date: str          # YYYY-MM-DD
-    end_date: str            # YYYY-MM-DD
-    prompt: str              # NL strategy description
+    symbol:          str
+    exchange:        str   = "NSE"
+    start_date:      str
+    end_date:        str
+    prompt:          str
     initial_capital: float = 100000.0
+    resolution:      str   = "D"
 
 
 class BacktestCreateResponse(BaseModel):
     backtest_id: str
-    status: str = "pending"
+    status:      str = "pending"
 
-
-# ── Background task 
 
 def run_backtest_task(
-    backtest_id: str,
-    symbol: str,
-    exchange: str,
-    start_date: str,
-    end_date: str,
-    prompt: str,
+    backtest_id:     str,
+    user_id:         str,
+    symbol:          str,
+    exchange:        str,
+    start_date:      str,
+    end_date:        str,
+    prompt:          str,
     initial_capital: float,
-    db_url: str,
+    resolution:      str,
+    db_url:          str,
 ):
-    """
-    Runs in background. Imports Account 2 + Account 3 modules.
-    Falls back gracefully if modules not yet merged.
-    """
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
     engine = create_engine(db_url, pool_pre_ping=True)
-    Session = sessionmaker(bind=engine)
-    db = Session()
+    Sess   = sessionmaker(bind=engine)
+    db     = Sess()
 
     try:
-        # Mark running
         db.execute(
             text("UPDATE public.backtests SET status='running' WHERE id=:id"),
             {"id": backtest_id},
         )
         db.commit()
 
-        # ── Account 2: fetch OHLCV data 
-        try:
-            from app.data import get_ohlcv
-            df = get_ohlcv(symbol, start_date, end_date, exchange)
-        except ImportError:
-            raise RuntimeError(
-                "Data module not yet available. "
-                "Merge Account 2 branch (data-pipeline) first."
-            )
+        from app.orchestrator import graph, AgentState
 
-        if df is None or df.empty:
-            raise RuntimeError(f"No OHLCV data returned for {symbol} ({start_date} → {end_date})")
+        initial_state: AgentState = {
+            "user_id":         user_id,
+            "backtest_id":     backtest_id,
+            "symbol":          symbol,
+            "exchange":        exchange,
+            "start_date":      start_date,
+            "end_date":        end_date,
+            "prompt":          prompt,
+            "initial_capital": initial_capital,
+            "resolution":      resolution,
+            "df":              None,
+            "generated_code":  None,
+            "backtest_result": None,
+            "risk_result":     None,
+            "compliance":      None,
+            "audit_hash":      None,
+            "error":           None,
+            "current_step":    None,
+        }
 
-        # ── Account 3: generate code + run backtest 
-        try:
-            from app.agents import generate_strategy_code, run_backtest
-        except ImportError:
-            raise RuntimeError(
-                "Agents module not yet available. "
-                "Merge Account 3 branch (ai-backtest-engine) first."
-            )
+        final_state = graph.invoke(initial_state)
 
-        code = generate_strategy_code(prompt, api_key=settings.groq_api_key)
-        result = run_backtest(
-            code,
-            df,
-            initial_capital,
-            symbol=symbol,
-            start=start_date,
-            end=end_date,
-        )
+        if final_state.get("error"):
+            raise RuntimeError(final_state["error"])
 
+        risk = final_state.get("risk_result") or {}
+        comp = final_state.get("compliance")  or {}
 
         results_dict = {
-            "total_return_pct":  result.total_return_pct,
-            "cagr":              result.cagr,
-            "sharpe_ratio":      result.sharpe_ratio,
-            "max_drawdown_pct":  result.max_drawdown_pct,
-            "win_rate":          result.win_rate,
-            "total_trades":      result.total_trades,
-            "dsr_score":         result.dsr_score,
-            "equity_curve":      result.equity_curve,
-            "trades":            result.trades,
-            "generated_code":    code,
-            "prompt":            prompt,
-            # Data provenance — always recorded so frontend + audit know source
-            "data_source":       result.data_source,
-            "rows_used":         result.rows_used,
+            "total_return_pct": risk.get("total_return_pct"),
+            "cagr":             risk.get("cagr"),
+            "sharpe_ratio":     risk.get("sharpe_ratio"),
+            "max_drawdown_pct": risk.get("max_drawdown_pct"),
+            "win_rate":         risk.get("win_rate"),
+            "total_trades":     risk.get("total_trades"),
+            "dsr_score":        risk.get("dsr_score"),
+            "equity_curve":     risk.get("equity_curve", []),
+            "trades":           risk.get("trades", []),
+            "monte_carlo":      risk.get("monte_carlo"),
+            "walk_forward":     risk.get("walk_forward"),
+            "compliance":       comp,
+            "generated_code":   final_state.get("generated_code"),
         }
+
+        audit_hash = final_state.get("audit_hash", "")
 
         db.execute(
             text("""
                 UPDATE public.backtests
-                SET status       = 'completed',
-                    results      = :results,
-                    audit_hash   = :audit_hash,
-                    completed_at = NOW()
-                WHERE id = :id
+                SET status='completed', results=:results,
+                    audit_hash=:audit_hash, completed_at=NOW()
+                WHERE id=:id
             """),
             {
                 "id":         backtest_id,
-                "results":    json.dumps(results_dict),
-                "audit_hash": result.audit_hash,
+                "results":    json.dumps(results_dict, default=str),
+                "audit_hash": audit_hash,
             },
         )
         db.commit()
-
-        _write_audit_log(db, backtest_id, "completed", results_dict, result.audit_hash)
+        _write_audit_log(db, backtest_id, "completed", {"audit_hash": audit_hash}, audit_hash)
 
     except Exception as e:
         db.execute(
-            text("""
-                UPDATE public.backtests
-                SET status='failed', error_message=:err, completed_at=NOW()
-                WHERE id=:id
-            """),
+            text("UPDATE public.backtests SET status='failed', error_message=:err, completed_at=NOW() WHERE id=:id"),
             {"id": backtest_id, "err": str(e)},
         )
         db.commit()
@@ -147,46 +134,33 @@ def run_backtest_task(
 
 
 def _write_audit_log(db, backtest_id: str, event: str, payload: dict, current_hash: str):
-    """Append-only audit log with Merkle-style chaining."""
     try:
         prev = db.execute(
-            text("""
-                SELECT hash FROM public.audit_log
-                WHERE backtest_id = :bid
-                ORDER BY id DESC LIMIT 1
-            """),
+            text("SELECT hash FROM public.audit_log WHERE backtest_id=:bid ORDER BY id DESC LIMIT 1"),
             {"bid": backtest_id},
         ).fetchone()
-        prev_hash = prev[0] if prev else None
-
         db.execute(
-            text("""
-                INSERT INTO public.audit_log (backtest_id, event, payload, hash, prev_hash)
-                VALUES (:bid, :event, :payload, :hash, :prev_hash)
-            """),
+            text("INSERT INTO public.audit_log (backtest_id, event, payload, hash, prev_hash) VALUES (:bid, :event, :payload, :hash, :prev_hash)"),
             {
                 "bid":       backtest_id,
                 "event":     event,
-                "payload":   json.dumps(payload),
+                "payload":   json.dumps(payload, default=str),
                 "hash":      current_hash,
-                "prev_hash": prev_hash,
+                "prev_hash": prev[0] if prev else None,
             },
         )
         db.commit()
     except Exception:
-        pass  # Never let audit failure break the main flow
-
-
+        pass
 
 
 @router.post("", response_model=BacktestCreateResponse, status_code=202)
 def create_backtest(
-    body: BacktestRequest,
+    body:             BacktestRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    db:               Session = Depends(get_db),
+    current_user:     dict    = Depends(get_current_user),
 ):
-    # Validate dates
     try:
         start = date.fromisoformat(body.start_date)
         end   = date.fromisoformat(body.end_date)
@@ -196,18 +170,17 @@ def create_backtest(
         raise HTTPException(status_code=400, detail="start_date must be before end_date")
     if not body.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt cannot be empty")
+    if body.resolution not in VALID_RESOLUTIONS:
+        raise HTTPException(status_code=400, detail=f"resolution must be one of {VALID_RESOLUTIONS}")
 
     backtest_id = str(uuid.uuid4())
-    user_id = current_user["sub"]
+    user_id     = current_user["sub"]
 
     db.execute(
         text("""
             INSERT INTO public.backtests
-                (id, user_id, symbol, exchange, start_date, end_date,
-                 initial_capital, status)
-            VALUES
-                (:id, :user_id, :symbol, :exchange, :start_date, :end_date,
-                 :capital, 'pending')
+                (id, user_id, symbol, exchange, start_date, end_date, initial_capital, status)
+            VALUES (:id, :user_id, :symbol, :exchange, :start_date, :end_date, :capital, 'pending')
         """),
         {
             "id":         backtest_id,
@@ -221,22 +194,23 @@ def create_backtest(
     )
     db.commit()
 
-    # Write initial audit entry
     _write_audit_log(db, backtest_id, "created", {
         "symbol": body.symbol, "start": body.start_date,
-        "end": body.end_date, "prompt": body.prompt,
+        "end": body.end_date, "resolution": body.resolution,
+        "prompt": body.prompt[:200],
     }, "")
 
-    # Kick off background task
     background_tasks.add_task(
         run_backtest_task,
         backtest_id=backtest_id,
+        user_id=user_id,
         symbol=body.symbol.upper().strip(),
         exchange=body.exchange.upper(),
         start_date=body.start_date,
         end_date=body.end_date,
         prompt=body.prompt,
         initial_capital=body.initial_capital,
+        resolution=body.resolution,
         db_url=settings.database_url,
     )
 
@@ -245,10 +219,10 @@ def create_backtest(
 
 @router.get("/list")
 def list_backtests(
-    limit: int = 20,
-    offset: int = 0,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    limit:        int  = 20,
+    offset:       int  = 0,
+    db:           Session = Depends(get_db),
+    current_user: dict    = Depends(get_current_user),
 ):
     rows = db.execute(
         text("""
@@ -256,7 +230,7 @@ def list_backtests(
                    status, audit_hash, created_at, completed_at,
                    results->>'total_return_pct' AS total_return_pct,
                    results->>'sharpe_ratio'     AS sharpe_ratio,
-                   results->>'prompt'           AS prompt
+                   results->>'dsr_score'        AS dsr_score
             FROM public.backtests
             WHERE user_id = :uid
             ORDER BY created_at DESC
@@ -278,17 +252,38 @@ def list_backtests(
             "completed_at":     str(r.completed_at) if r.completed_at else None,
             "total_return_pct": r.total_return_pct,
             "sharpe_ratio":     r.sharpe_ratio,
-            "prompt":           r.prompt,
+            "dsr_score":        r.dsr_score,
         }
         for r in rows
     ]
 
 
+@router.get("/{backtest_id}/audit")
+def get_audit_trail(
+    backtest_id:  str,
+    db:           Session = Depends(get_db),
+    current_user: dict    = Depends(get_current_user),
+):
+    owner = db.execute(
+        text("SELECT user_id FROM public.backtests WHERE id=:id"),
+        {"id": backtest_id},
+    ).fetchone()
+    if not owner or str(owner.user_id) != current_user["sub"]:
+        raise HTTPException(status_code=404, detail="Backtest not found")
+
+    logs = db.execute(
+        text("SELECT event, payload, hash, prev_hash, created_at FROM public.audit_log WHERE backtest_id=:bid ORDER BY id ASC"),
+        {"bid": backtest_id},
+    ).fetchall()
+
+    return [{"event": r.event, "payload": r.payload, "hash": r.hash, "prev_hash": r.prev_hash, "created_at": str(r.created_at)} for r in logs]
+
+
 @router.get("/{backtest_id}")
 def get_backtest(
-    backtest_id: str,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    backtest_id:  str,
+    db:           Session = Depends(get_db),
+    current_user: dict    = Depends(get_current_user),
 ):
     row = db.execute(
         text("""
@@ -296,7 +291,7 @@ def get_backtest(
                    initial_capital, status, error_message, results,
                    audit_hash, created_at, completed_at
             FROM public.backtests
-            WHERE id = :id AND user_id = :uid
+            WHERE id=:id AND user_id=:uid
         """),
         {"id": backtest_id, "uid": current_user["sub"]},
     ).fetchone()
@@ -323,39 +318,3 @@ def get_backtest(
         response.update(results)
 
     return response
-
-
-@router.get("/{backtest_id}/audit")
-def get_audit_trail(
-    backtest_id: str,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    # Verify ownership
-    owner = db.execute(
-        text("SELECT user_id FROM public.backtests WHERE id=:id"),
-        {"id": backtest_id},
-    ).fetchone()
-    if not owner or str(owner.user_id) != current_user["sub"]:
-        raise HTTPException(status_code=404, detail="Backtest not found")
-
-    logs = db.execute(
-        text("""
-            SELECT event, payload, hash, prev_hash, created_at
-            FROM public.audit_log
-            WHERE backtest_id = :bid
-            ORDER BY id ASC
-        """),
-        {"bid": backtest_id},
-    ).fetchall()
-
-    return [
-        {
-            "event":      r.event,
-            "payload":    r.payload,
-            "hash":       r.hash,
-            "prev_hash":  r.prev_hash,
-            "created_at": str(r.created_at),
-        }
-        for r in logs
-    ]

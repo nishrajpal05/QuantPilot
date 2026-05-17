@@ -12,3 +12,4 @@ backend/app/core/__init__.py
 backend/app/api/__init__.py
 backend/app/__init__.py
 backend/.yfinance-cache/tkr-tz.db
+*.ps1
